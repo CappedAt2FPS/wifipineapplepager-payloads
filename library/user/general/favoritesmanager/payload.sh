@@ -74,7 +74,7 @@ CONFIRMATION_DIALOG "If payloads in the main directory have been updated with gi
     done
 
     LOG
-    LOG "✅ Favorites update complete."
+    LOG "Favorites update complete."
     continue
   fi
 
@@ -191,3 +191,4 @@ CONFIRMATION_DIALOG "If payloads in the main directory have been updated with gi
 
 
 done
+
