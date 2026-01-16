@@ -113,8 +113,8 @@ check_wpa_supplicant() {
     if ! opkg list-installed 2>/dev/null | grep -q "^wpa-cli "; then
         return 1
     fi
-    # Check for wpad-openssl (full hostapd+wpa_supplicant with HS2.0)
-    if opkg list-installed 2>/dev/null | grep -q "^wpad-openssl "; then
+    # Check for wpad (full hostapd+wpa_supplicant with HS2.0)
+    if opkg list-installed 2>/dev/null | grep -q "^wpad "; then
         return 0
     fi
     # Check if wpa-supplicant-openssl is installed (has HS2.0 support)
@@ -140,7 +140,7 @@ check_internet() {
     return 1
 }
 
-# Install wpad-openssl (includes wpa_supplicant with HS2.0 support)
+# Install wpad (includes wpa_supplicant with HS2.0 support)
 install_wpa_supplicant() {
     LOG ""
     LOG "Installing HS2.0 support..."
@@ -176,12 +176,13 @@ install_wpa_supplicant() {
     LOG ""
 
     # Check for conflicting wpad packages (wpad-basic-mbedtls, wpad-mini, etc.)
-    local conflicts=$(opkg list-installed 2>/dev/null | grep -E "^wpad-" | grep -v "wpad-openssl" | cut -d' ' -f1)
+    # The full "wpad" package replaces all wpad-* variants
+    local conflicts=$(opkg list-installed 2>/dev/null | grep -E "^wpad-" | cut -d' ' -f1)
     if [ -n "$conflicts" ]; then
         LOG "Package conflict detected:"
         LOG "  $conflicts"
         LOG ""
-        LOG "wpad-openssl will REPLACE this."
+        LOG "wpad will REPLACE this."
         LOG "It has same features + HS2.0."
         LOG "All WiFi functions will still work."
         LOG ""
@@ -203,14 +204,14 @@ install_wpa_supplicant() {
         esac
     fi
 
-    LOG "Installing wpad-openssl..."
+    LOG "Installing wpad..."
 
     # Capture install output for error reporting
     local install_output
     local install_err
 
-    # Install wpad-openssl (full package with hostapd+wpa_supplicant+HS2.0)
-    install_output=$(opkg install wpad-openssl 2>&1)
+    # Install wpad (full package with hostapd+wpa_supplicant+HS2.0)
+    install_output=$(opkg install wpad 2>&1)
     if [ $? -eq 0 ]; then
         # Also install wpa-cli (separate package needed for ANQP queries)
         LOG "Installing wpa-cli..."
@@ -232,7 +233,7 @@ install_wpa_supplicant() {
     LOG ""
     LOG "Try manually:"
     LOG "  opkg remove wpad-basic-mbedtls"
-    LOG "  opkg install wpad-openssl wpa-cli"
+    LOG "  opkg install wpad wpa-cli"
     LOG ""
     LOG "[A] Retry  [B] Continue without"
     local btn=$(WAIT_FOR_INPUT)
@@ -2406,7 +2407,7 @@ show_results_summary() {
         LOG "Beacon Data from $ap_count APs:"
         LOG "  Beacon RCOIs:  $beacon_rcoi_count"
         LOG ""
-        LOG "(Install wpad-openssl for"
+        LOG "(Install wpad for"
         LOG " full ANQP data)"
     fi
     LOG ""
@@ -2434,7 +2435,7 @@ show_config_menu() {
         LOG "[B] Exit"
     else
         LOG "Mode: BEACON ONLY"
-        LOG "(wpad-openssl missing)"
+        LOG "(wpad missing)"
         LOG ""
         LOG "Without ANQP support:"
         LOG "  + Detect Passpoint APs"
@@ -2446,7 +2447,7 @@ show_config_menu() {
         LOG ""
         LOG "[A] Start Beacon-Only Scan"
         LOG "[B] Exit"
-        LOG "[>] Install wpad-openssl"
+        LOG "[>] Install wpad"
     fi
     LOG ""
 }
@@ -2530,7 +2531,7 @@ if $ANQP_AVAILABLE; then
 else
     LOG ""
     LOG "=== BEACON-ONLY MODE ==="
-    LOG "Skipping ANQP queries (wpad-openssl not installed)"
+    LOG "Skipping ANQP queries (wpad not installed)"
     LOG ""
     # In beacon-only mode, decode and display beacon RCOIs
     if [ -f "$UNIQUE_SSIDS_FILE" ]; then
