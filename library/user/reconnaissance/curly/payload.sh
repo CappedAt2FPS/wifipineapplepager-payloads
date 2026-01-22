@@ -8,7 +8,7 @@
 LOOTDIR=/root/loot/curly
 INPUT=/dev/input/event0
 TIMEOUT=10
-DISCORD_WEBHOOK="https://discord.com/api/webhooks/1415853297767809074/SbEIEyc5A03q617Xvw35KESQcEEPXBSjJOxyuo7hPF9XSMbGvHVRqoLo2QdeDOi307B1"  # Set your Discord webhook URL here
+DISCORD_WEBHOOK=""  # Set your Discord webhook URL here
 
 # Severity tracking
 CRITICAL_FINDINGS=0
